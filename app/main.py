@@ -1,9 +1,8 @@
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import Response
 
-from . import storage
-from .config import Settings, get_settings
 from .security import verify_upload_api_key
+from .storage import StorageBackend, get_storage_backend
 
 app = FastAPI(title="dbt Doc Hosting Service")
 
@@ -13,8 +12,6 @@ CONTENT_TYPES = {
     "catalog.json": "application/json",
     "run_results.json": "application/json",
 }
-
-REQUIRED_FILES = ("index.html", "manifest.json", "catalog.json")
 
 
 @app.get("/healthz")
@@ -28,7 +25,7 @@ async def upload_docs(
     manifest_json: UploadFile = File(...),
     catalog_json: UploadFile = File(...),
     run_results_json: UploadFile | None = File(None),
-    settings: Settings = Depends(get_settings),
+    storage: StorageBackend = Depends(get_storage_backend),
 ):
     """Accept the artifacts produced by `dbt docs generate` and store them.
 
@@ -46,28 +43,28 @@ async def upload_docs(
 
     for filename, upload in uploads.items():
         content = await upload.read()
-        storage.put_object(settings, filename, content, CONTENT_TYPES[filename])
+        storage.put_object(filename, content, CONTENT_TYPES[filename])
 
     return {"status": "uploaded", "files": list(uploads.keys())}
 
 
-def _serve_file(filename: str, settings: Settings) -> Response:
-    if not storage.object_exists(settings, filename):
+def _serve_file(filename: str, storage: StorageBackend) -> Response:
+    if not storage.object_exists(filename):
         raise HTTPException(status_code=404, detail="Docs have not been uploaded yet")
-    content = storage.get_object(settings, filename)
+    content = storage.get_object(filename)
     return Response(content=content, media_type=CONTENT_TYPES[filename])
 
 
 @app.get("/")
-def serve_index(settings: Settings = Depends(get_settings)):
-    return _serve_file("index.html", settings)
+def serve_index(storage: StorageBackend = Depends(get_storage_backend)):
+    return _serve_file("index.html", storage)
 
 
 @app.get("/manifest.json")
-def serve_manifest(settings: Settings = Depends(get_settings)):
-    return _serve_file("manifest.json", settings)
+def serve_manifest(storage: StorageBackend = Depends(get_storage_backend)):
+    return _serve_file("manifest.json", storage)
 
 
 @app.get("/catalog.json")
-def serve_catalog(settings: Settings = Depends(get_settings)):
-    return _serve_file("catalog.json", settings)
+def serve_catalog(storage: StorageBackend = Depends(get_storage_backend)):
+    return _serve_file("catalog.json", storage)

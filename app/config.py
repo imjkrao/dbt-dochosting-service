@@ -4,12 +4,28 @@ from typing import Literal
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+#: 100 MiB. Real dbt manifests on large projects reach tens of megabytes; this
+#: bounds how much a single upload can ask the process to hold.
+DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="DOCHOST_", extra="ignore", frozen=True)
 
     upload_api_key: str
     storage_backend: Literal["s3", "azure", "local"] = "local"
+
+    # Serving and limits
+    max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    #: Redirect large artifacts to a time-limited storage URL instead of
+    #: proxying the bytes. Off by default: it makes the browser fetch
+    #: cross-origin, so the bucket needs a CORS rule first. See README.
+    presigned_redirects: bool = False
+    presigned_expiry_seconds: int = 900
+
+    # Observability
+    log_level: str = "INFO"
+    log_format: Literal["json", "text"] = "json"
 
     # Local filesystem backend
     local_storage_path: str = "./data/docs"
@@ -41,6 +57,8 @@ class Settings(BaseSettings):
                     "DOCHOST_AZURE_CONNECTION_STRING, or both DOCHOST_AZURE_ACCOUNT_URL and "
                     "DOCHOST_AZURE_ACCOUNT_KEY, are required when DOCHOST_STORAGE_BACKEND=azure"
                 )
+        if self.max_upload_bytes <= 0:
+            raise ValueError("DOCHOST_MAX_UPLOAD_BYTES must be positive")
         return self
 
 

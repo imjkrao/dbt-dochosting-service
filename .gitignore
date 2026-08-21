@@ -9,3 +9,6 @@ venv/
 htmlcov/
 dist/
 build/
+
+# Local-backend uploads
+data/

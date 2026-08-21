@@ -87,11 +87,15 @@ def _serve(
         if url:
             return RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
-    return Response(
-        content=storage.get_object(key),
-        media_type=content_type_for(filename),
-        headers=headers,
-    )
+    media_type = content_type_for(filename)
+
+    if request.method == "HEAD":
+        # Answer from metadata alone. Fetching the object to discard its body
+        # would mean downloading a whole manifest per HEAD request.
+        headers["Content-Length"] = str(info.size)
+        return Response(status_code=200, media_type=media_type, headers=headers)
+
+    return Response(content=storage.get_object(key), media_type=media_type, headers=headers)
 
 
 # --------------------------------------------------------------------------- #
@@ -115,12 +119,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # ----------------------------- health ---------------------------------- #
 
-    @app.get("/healthz", tags=["ops"])
+    @app.api_route("/healthz", methods=["GET", "HEAD"], tags=["ops"])
     def healthz() -> dict:
         """Liveness: is the process up. Deliberately does not touch storage."""
         return {"status": "ok"}
 
-    @app.get("/readyz", tags=["ops"])
+    @app.api_route("/readyz", methods=["GET", "HEAD"], tags=["ops"])
     def readyz(storage: StorageBackend = Depends(get_storage)) -> dict:
         """Readiness: can the process actually reach its storage backend."""
         try:
@@ -263,7 +267,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     # Pinned-version routes are declared first so "v" is never taken as a filename.
-    @app.get("/p/{project}/v/{version}/", tags=["serve"])
+    @app.api_route("/p/{project}/v/{version}/", methods=["GET", "HEAD"], tags=["serve"])
     def serve_pinned_index(
         project: str,
         version: str,
@@ -273,7 +277,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Response:
         return _serve_from(project, version, "index.html", request, storage, settings, True)
 
-    @app.get("/p/{project}/v/{version}/{filename}", tags=["serve"])
+    @app.api_route("/p/{project}/v/{version}/{filename}", methods=["GET", "HEAD"], tags=["serve"])
     def serve_pinned_file(
         project: str,
         version: str,
@@ -286,7 +290,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Unknown artifact")
         return _serve_from(project, version, filename, request, storage, settings, True)
 
-    @app.get("/p/{project}/", tags=["serve"])
+    @app.api_route("/p/{project}/", methods=["GET", "HEAD"], tags=["serve"])
     def serve_index(
         project: str,
         request: Request,
@@ -296,7 +300,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version = _resolve_latest(storage, keys.DEFAULT_ORG, project)
         return _serve_from(project, version, "index.html", request, storage, settings, False)
 
-    @app.get("/p/{project}/{filename}", tags=["serve"])
+    @app.api_route("/p/{project}/{filename}", methods=["GET", "HEAD"], tags=["serve"])
     def serve_file(
         project: str,
         filename: str,
@@ -310,7 +314,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return _serve_from(project, version, filename, request, storage, settings, False)
 
     # Default-project shortcuts, preserving the original single-project URLs.
-    @app.get("/", tags=["serve"])
+    @app.api_route("/", methods=["GET", "HEAD"], tags=["serve"])
     def serve_default_index(
         request: Request,
         storage: StorageBackend = Depends(get_storage),
@@ -327,7 +331,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 def _register_default_route(app: FastAPI, filename: str) -> None:
     """Expose ``/{filename}`` for the default project (e.g. ``/manifest.json``)."""
 
-    @app.get(f"/{filename}", tags=["serve"], name=f"serve_default_{filename.replace('.', '_')}")
+    @app.api_route(
+        f"/{filename}",
+        methods=["GET", "HEAD"],
+        tags=["serve"],
+        name=f"serve_default_{filename.replace('.', '_')}",
+    )
     def _route(
         request: Request,
         storage: StorageBackend = Depends(get_storage),

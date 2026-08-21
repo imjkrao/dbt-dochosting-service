@@ -37,6 +37,10 @@ both a `url` (latest) and `version_url` (pinned).
 Reads are currently public. Responses carry `ETag`, so conditional `GET`
 returns `304`.
 
+All read and ops routes also answer `HEAD`, with the same headers as `GET`.
+`HEAD` is served from storage metadata alone, so it never downloads the object
+just to discard the body.
+
 ### Operations
 
 | Method | Path | Description |
